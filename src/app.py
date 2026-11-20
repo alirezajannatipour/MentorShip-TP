@@ -36,7 +36,8 @@ def _error_response(status_code: int, code: str, message: str, **extra) -> JSONR
 
 @app.exception_handler(AppError)
 async def handle_app_error(_request: Request, exc: AppError):
-    return _error_response(exc.status_code, exc.code, exc.message)
+    extra = {"details": exc.details} if exc.details else {}
+    return _error_response(exc.status_code, exc.code, exc.message, **extra)
 
 
 @app.exception_handler(RequestValidationError)

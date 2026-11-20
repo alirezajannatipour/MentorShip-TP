@@ -1,4 +1,3 @@
-import math
 from typing import Any
 
 import psycopg
@@ -8,6 +7,7 @@ from src.repositories import categories as categories_repo
 from src.repositories import products as products_repo
 from src.repositories import shops as shops_repo
 from src.schemas.products import ProductCreate
+from src.utils.pagination import build_pagination
 
 
 def get_product(conn: psycopg.Connection, product_id: int) -> dict[str, Any]:
@@ -82,10 +82,5 @@ def list_products(
     )
     return {
         "items": items,
-        "pagination": {
-            "total": total,
-            "page": page,
-            "limit": limit,
-            "total_pages": math.ceil(total / limit),
-        },
+        "pagination": build_pagination(total, page, limit),
     }

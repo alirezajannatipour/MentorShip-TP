@@ -2,7 +2,7 @@ from collections.abc import Iterator
 from typing import Annotated, Any
 
 import psycopg
-from fastapi import Depends
+from fastapi import Depends, Header
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from src.connections.postgresql import pool
@@ -38,3 +38,21 @@ def get_current_user(
 
 
 CurrentUser = Annotated[dict[str, Any], Depends(get_current_user)]
+
+
+def get_idempotency_key(
+    idempotency_key: Annotated[str | None, Header()] = None,
+) -> str:
+    key = (idempotency_key or "").strip()
+    if not key:
+        raise AppError(
+            422, "IDEMPOTENCY_KEY_REQUIRED", "هدر Idempotency-Key الزامی است."
+        )
+    if len(key) > 100:
+        raise AppError(
+            422, "IDEMPOTENCY_KEY_INVALID", "Idempotency-Key حداکثر ۱۰۰ کاراکتر است."
+        )
+    return key
+
+
+IdempotencyKey = Annotated[str, Depends(get_idempotency_key)]

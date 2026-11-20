@@ -140,3 +140,35 @@ def list_products(
         """,
         [*params, limit, offset],
     ).fetchall()
+
+
+def get_active_product_stock(conn: psycopg.Connection, product_id: int) -> Row | None:
+    return conn.execute(
+        "SELECT id, stock FROM products WHERE id = %s AND is_active = TRUE",
+        (product_id,),
+    ).fetchone()
+
+
+def reserve_stock(conn: psycopg.Connection, product_id: int, quantity: int) -> bool:
+    """اتمیک: فقط اگر موجودی کافی باشد کم می‌کند و sold_count را زیاد می‌کند."""
+    row = conn.execute(
+        """
+        UPDATE products
+        SET stock = stock - %s, sold_count = sold_count + %s
+        WHERE id = %s AND stock >= %s
+        RETURNING id
+        """,
+        (quantity, quantity, product_id, quantity),
+    ).fetchone()
+    return row is not None
+
+
+def restore_stock(conn: psycopg.Connection, product_id: int, quantity: int) -> None:
+    conn.execute(
+        """
+        UPDATE products
+        SET stock = stock + %s, sold_count = GREATEST(sold_count - %s, 0)
+        WHERE id = %s
+        """,
+        (quantity, quantity, product_id),
+    )
