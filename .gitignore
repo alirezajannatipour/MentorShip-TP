@@ -10,3 +10,6 @@ venv/
 
 # editors
 .idea/
+
+# load test
+loadtest/tokens.json

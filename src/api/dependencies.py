@@ -1,11 +1,13 @@
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
+import anyio
 import psycopg
 from fastapi import Depends, Header
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from src.connections.postgresql import pool
+from src.config import settings
+from src.connections.postgresql import get_slots, pool
 from src.errors import AppError
 from src.repositories import users as users_repo
 from src.utils.security import decode_access_token
@@ -13,10 +15,44 @@ from src.utils.security import decode_access_token
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
-def get_conn() -> Iterator[psycopg.Connection]:
-    """یک کانکشن از pool می‌دهد و در پایان درخواست پسش می‌دهد."""
-    with pool.connection() as conn:
-        yield conn
+def _release(conn: psycopg.Connection, failed: bool) -> None:
+    try:
+        if failed:
+            conn.rollback()
+        else:
+            conn.commit()
+    finally:
+        pool.putconn(conn)
+
+
+async def get_conn() -> AsyncIterator[psycopg.Connection]:
+    """یک کانکشن به‌ازای هر درخواست.
+
+    ابتدا یک «جای خالی» می‌گیرد (حداکثر به اندازه‌ی pool)؛ اگر نبود، بدون اشغال thread در صف
+    async منتظر می‌ماند و بعد از db_acquire_timeout ثانیه 503 می‌دهد. بعدش کانکشن
+    گرفتن و برگرداندن در threadهای جدا انجام می‌شود تا event loop قفل نشود.
+    """
+    slots = get_slots()
+    try:
+        with anyio.fail_after(settings.db_acquire_timeout):
+            await slots.acquire()
+    except TimeoutError:
+        raise AppError(
+            503, "SERVICE_BUSY", "سرور شلوغ است؛ کمی بعد دوباره تلاش کنید."
+        ) from None
+    try:
+        conn = await anyio.to_thread.run_sync(pool.getconn)
+        failed = False
+        try:
+            yield conn
+        except BaseException:
+            failed = True
+            raise
+        finally:
+            with anyio.CancelScope(shield=True):
+                await anyio.to_thread.run_sync(_release, conn, failed)
+    finally:
+        slots.release()
 
 
 DbConn = Annotated[psycopg.Connection, Depends(get_conn)]

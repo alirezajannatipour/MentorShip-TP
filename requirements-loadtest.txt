@@ -1,0 +1,5 @@
+# فقط برای تست بار (در سرویس اصلی لازم نیست)؛ همان گروه loadtest در pyproject.toml
+locust>=2.29
+matplotlib>=3.8
+pandas>=2.1
+psutil>=5.9

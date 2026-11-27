@@ -40,8 +40,8 @@
 │   │   └── migrate.py          # اجرای migrationها
 │   └── utils/                  # هش رمز، JWT، صفحه‌بندی
 ├── .env.example
-├── pyproject.toml
-├── requirements.txt
+├── pyproject.toml          # وابستگی‌ها
+├── uv.lock                 # نسخه‌ی دقیق وابستگی‌ها
 └── README.md
 ```
 
@@ -51,13 +51,17 @@
 
 پیش‌نیاز: Python 3.11 یا بالاتر و PostgreSQL در حال اجرا.
 
-۱. نصب پکیج‌ها (یکی از دو روش):
+۱. نصب پکیج‌ها با [uv](https://docs.astral.sh/uv/) (اگر نصب نیست: `pip install uv`):
 
 ```bash
-# روش اول: uv
 uv sync
+```
 
-# روش دوم: pip
+این دستور محیط مجازی (`.venv`) را می‌سازد و دقیقاً نسخه‌های قفل‌شده‌ی `uv.lock` را نصب می‌کند. همه‌ی وابستگی‌ها داخل `pyproject.toml` هستند.
+
+بدون uv هم می‌شود (دستورهای بعدی را بدون `uv run` بزنید):
+
+```bash
 python -m venv .venv
 .venv\Scripts\activate          # ویندوز  (لینوکس و مک: source .venv/bin/activate)
 pip install -r requirements.txt
@@ -77,13 +81,13 @@ JWT_SECRET=یک-رشته-تصادفی-حداقل-۳۲-کاراکتری
 ۴. ساخت یا به‌روزرسانی جدول‌ها (فقط migrationهای اجرا‌نشده اعمال می‌شوند، پس روی دیتابیس قبلی هم امن است):
 
 ```bash
-python -m src.data.migrate      # با uv:  uv run python -m src.data.migrate
+uv run python -m src.data.migrate
 ```
 
 ۵. اجرای سرور:
 
 ```bash
-uvicorn src.app:app --reload    # با uv:  uv run uvicorn src.app:app --reload
+uv run uvicorn src.app:app --reload
 ```
 
 مستندات تعاملی: `http://127.0.0.1:8000/docs` (برای endpointهای نیازمند ورود، دکمه‌ی Authorize را بزنید و توکن را بدهید.)
@@ -149,6 +153,10 @@ uvicorn src.app:app --reload    # با uv:  uv run uvicorn src.app:app --reload
 
 انتقال غیرمجاز `409` و نقش غیرمجاز `403` می‌دهد؛ کسی که به سفارش مربوط نیست `404` می‌گیرد.
 
+## تست بار
+
+سناریوی Locust، اسکریپت پر کردن دیتابیس تستی و ابزار ساخت نمودار داخل پوشه‌ی `loadtest/` است. راه اجرا در `loadtest/README.md` آمده است.
+
 ## تصمیم‌های طراحی
 
 - **SQL خام به‌جای ORM:** کوئری‌ها توی `repositories/` با `psycopg` نوشته شده‌اند و همیشه پارامتری هستند. مقدار `sort` فقط کلید یک دیکشنری ثابت است.
@@ -161,3 +169,5 @@ uvicorn src.app:app --reload    # با uv:  uv run uvicorn src.app:app --reload
 - **حریم خصوصی:** در خروجی سفارش فقط snapshot گیرنده دیده می‌شود؛ شناسه و ایمیل خریدار به فروشنده داده نمی‌شود.
 - **رمز عبور:** با Argon2 هش می‌شود. توکن JWT با امضای HS256 و انقضای ۲۴ ساعته است.
 - **قیمت:** عدد صحیح به تومان (`BIGINT`).
+- **اندازه‌ی pool (`DB_POOL_MIN_SIZE=1`، `DB_POOL_MAX_SIZE=10`):** این مقدارها محافظه‌کارانه انتخاب شدند و از اندازه‌گیری نیامده بودند. `max` سقف کار همزمان با دیتابیس در هر پروسه است و باید `تعداد workerها × max` از `max_connections` دیتابیس (پیش‌فرض ۱۰۰) کمتر بماند. `min=1` یعنی کانکشن بیکار نگه نمی‌داریم و pool در صورت نیاز بزرگ می‌شود. در تست بار PostgreSQL کمتر از ۱۲٪ CPU می‌گرفت و گلوگاه خود API بود، پس pool محدودکننده نبود. برای تنظیم دقیق‌تر باید `max` را تغییر داد و تأثیرش روی RPS و `db_active` را در تست بار دید.
+- **کنترل ورود کانکشن (درس تست بار):** endpointها sync هستند و در threadpool اجرا می‌شوند. اگر هر درخواست کانکشن را نگه دارد و برای ادامه‌ی کار منتظر thread بماند، وقتی همه‌ی threadها منتظر کانکشن باشند سرویس قفل می‌شود (در تست بار با ۱۰۰ کاربر دیده شد: ۹ از ۱۰ کانکشن در حالت `idle in transaction`، CPU نزدیک صفر و خطای `PoolTimeout` بعد از ۳۰ ثانیه). برای همین `get_conn` تعداد درخواست‌هایی که همزمان کانکشن دارند را با یک semaphore به اندازه‌ی pool محدود می‌کند؛ بقیه بدون اشغال thread در صف می‌مانند و بعد از `DB_ACQUIRE_TIMEOUT` ثانیه (پیش‌فرض ۱۰) پاسخ `503` می‌گیرند.
